@@ -30,7 +30,7 @@ use work.math_custom.all;
 -- Generics Description
 -- width             : the width of the FIFO in bits (required)
 -- depth             : the depth of the FIFO in words (required)
--- almost_full_space : the amount of space left in the FIFO when almost_full
+-- almost_full_count : the amount of words in the FIFO when almost_full
 --                     is asserted (required)
 -- use_bram          : uses bram when true, uses LUTs/FFs when false (required)
 -- same_cycle_output : output appears in same cycle as read when true, one
@@ -45,7 +45,7 @@ use work.math_custom.all;
 -- wr     : write input (active high)
 -- empty  : empty output (active high)
 -- full   : full output (active high)
--- almost_full : asserted when there is almost_full_space left (active high)
+-- almost_full : asserted when count >= almost_full_count (active high)
 -- input  : fifo input
 -- output : fifo output
 -------------------------------------------------------------------------------
@@ -53,7 +53,7 @@ use work.math_custom.all;
 entity fifo_core is
     generic(width             : positive;
             depth             : positive;
-            almost_full_space : natural;
+            almost_full_count : natural;
             use_bram          : boolean;
             same_cycle_output : boolean);
     port(clk         : in  std_logic;
@@ -63,6 +63,7 @@ entity fifo_core is
          empty       : out std_logic;
          full        : out std_logic;
          almost_full : out std_logic;
+         count       : out std_logic_vector(bitsNeeded(depth)-1 downto 0);
          input       : in  std_logic_vector(width-1 downto 0);
          output      : out std_logic_vector(width-1 downto 0));
 end fifo_core;
@@ -75,7 +76,7 @@ architecture FF of fifo_core is
 
     type reg_array is array (0 to depth-1) of std_logic_vector(width-1 downto 0);
     signal regs              : reg_array;
-    signal count, next_count : unsigned(bitsNeeded(depth)-1 downto 0);
+    signal count_r, next_count : unsigned(bitsNeeded(depth)-1 downto 0);
     signal valid_wr          : std_logic;
     signal valid_rd          : std_logic;
     signal empty_s           : std_logic;
@@ -111,13 +112,13 @@ begin
                 output <= (others => '0');
             elsif(rising_edge(clk)) then
                 -- count-1 is the front of the fifo
-                if (count = 0) then
+                if (count_r = 0) then
                     -- special case when fifo is empty. One alternative is to
                     -- increase the fifo depth to be a power of two,
                     -- in which case this isn't necessary.
                     output <= regs(0);
                 else
-                    output <= regs(to_integer(count-1));
+                    output <= regs(to_integer(count_r-1));
                 end if;
             end if;
         end process;
@@ -125,43 +126,44 @@ begin
 
     -- assign the output in the same cycle if applicable
     U_OUTPUT_SAME_CYCLE : if same_cycle_output = true generate
-        process(regs, count)
+        process(regs, count_r)
         begin
-            -- count-1 is the front of the fifo
-            if (count = 0) then
+            -- count_r-1 is the front of the fifo
+            if (count_r = 0) then
                 -- special case when fifo is empty. One alternative is to
                 -- require the fifo depth to be a power of two,
                 -- in which case this isn't necessary.                
                 output <= regs(0);
             else
-                output <= regs(to_integer(count-1));
+                output <= regs(to_integer(count_r-1));
             end if;
         end process;
     end generate;
 
     -- update empty flag
-    empty_s <= '1' when count = 0 else '0';
+    empty_s <= '1' when count_r = 0 else '0';
     empty   <= empty_s;
 
     -- update full flag
     --full_s <= '0' when rd = '1' else
-    --          '1' when count = depth else '0';
-    full_s <= '1' when count = depth else '0';
-    full <= full_s;
+    --          '1' when count_r = depth else '0';
+    full_s <= '1' when count_r = depth else '0';
+    full   <= full_s;
 
     -- update almost full flag
-    almost_full <= '1' when count >= depth-almost_full_space else '0';
-    
+    --almost_full <= '1' when count_r >= depth-almost_full_space else '0';
+    almost_full <= '1' when count_r >= almost_full_count else '0';
+
     -- determine valid write and read
     valid_wr <= wr and not full_s;
     valid_rd <= rd and not empty_s;
 
-    -- update count based on read and write signals
-    process(valid_rd, valid_wr, count)
+    -- update count_r based on read and write signals
+    process(valid_rd, valid_wr, count_r)
         variable count_v : unsigned(bitsNeeded(depth)-1 downto 0);
     begin
 
-        count_v := count;
+        count_v := count_r;
 
         if (valid_rd = '1' and valid_wr = '0') then
             count_v := count_v - 1;
@@ -176,11 +178,13 @@ begin
     process(clk, rst)
     begin
         if (rst = '1') then
-            count <= to_unsigned(0, count'length);
-        elsif (clk'event and clk = '1') then
-            count <= next_count;
+            count_r <= to_unsigned(0, count_r'length);
+        elsif (rising_edge(clk)) then
+            count_r <= next_count;
         end if;
     end process;
+
+    count <= std_logic_vector(count_r);
     
 end FF;
 
@@ -196,6 +200,8 @@ architecture MEMORY of fifo_core is
     signal valid_rd : std_logic;
     signal empty_s  : std_logic;
     signal full_s   : std_logic;
+
+    signal count_r, next_count : unsigned(bitsNeeded(depth)-1 downto 0);
     
 begin
 
@@ -320,17 +326,18 @@ begin
     end generate DIST_RAM;
 
     -- update empty flag
-    empty_s <= '1' when wr_addr = rd_addr else '0';
+    --empty_s <= '1' when wr_addr = rd_addr else '0';
+    empty_s <= '1' when count_r = 0 else '0';
     empty   <= empty_s;
 
     -- update full flag
     --full_s <= '0' when rd = '1' else
     --          '1' when wr_addr + 1 = rd_addr else '0';
-    full_s <= '1' when wr_addr + 1 = rd_addr else '0';
-    full <= full_s;
+    full_s <= '1' when count_r = depth else '0';
+    full   <= full_s;
 
     -- update almost_full flag
-    almost_full <= '1' when wr_addr + almost_full_space + 1 = rd_addr else '0';
+    almost_full <= '1' when count_r >= almost_full_count else '0';
 
     -- determine valid write and read
     valid_wr <= wr and not full_s;
@@ -353,5 +360,34 @@ begin
         end if;
     end process;
 
+    -- update count_r based on read and write signals
+    process(valid_rd, valid_wr, count_r)
+        variable count_v : unsigned(bitsNeeded(depth)-1 downto 0);
+    begin
+
+        count_v := count_r;
+
+        if (valid_rd = '1' and valid_wr = '0') then
+            count_v := count_v - 1;
+        elsif (valid_rd = '0' and valid_wr = '1') then
+            count_v := count_v + 1;
+        end if;
+
+        next_count <= count_v;
+    end process;
+
+    -- create count register
+    process(clk, rst)
+    begin
+        if (rst = '1') then
+            count_r <= to_unsigned(0, count_r'length);
+        elsif (rising_edge(clk)) then
+            count_r <= next_count;
+        end if;
+    end process;
+
+    count <= std_logic_vector(count_r);
+    
+    
 end MEMORY;
 

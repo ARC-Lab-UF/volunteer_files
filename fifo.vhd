@@ -32,12 +32,13 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+use work.math_custom.all;
+
 -------------------------------------------------------------------------------
 -- Generics Description
 -- width             : the width of the FIFO in bits (required)
 -- depth             : the depth of the FIFO in words (required)
--- almost_full_space : the amount of space left in the FIFO at which point
---                     almost_full should be asserted (default = 0)
+-- almost_full_count : the count at which almost_full is asserted (default = 0)
 -- use_bram          : uses bram when true, uses LUTs/FFs when false
 --                     (default = true)
 -- use_distribted_ram : uses distributed ram when true. If use_bram is also
@@ -56,8 +57,7 @@ use ieee.numeric_std.all;
 -- wr     : write enable 
 -- empty  : asserted when the FIFO is empty
 -- full   : asserted when the FIFO is full
--- almost_full : asserted when there is almost_full_space left in FIFO. When
---               almost_full_space = 0, this is equivalent to full.
+-- almost_full : asserted when count >=  almost_full_count
 -- input  : Input to write into the FIFO
 -- output : Output read from the FIFO
 -------------------------------------------------------------------------------
@@ -65,7 +65,7 @@ use ieee.numeric_std.all;
 entity fifo is
     generic(width               : positive;
             depth               : positive;
-            almost_full_space   : natural := 0;
+            almost_full_count   : natural := 0;
             use_bram            : boolean := true;
             use_distributed_ram : boolean := false;
             same_cycle_output   : boolean := false);
@@ -76,6 +76,7 @@ entity fifo is
          empty       : out std_logic;
          full        : out std_logic;
          almost_full : out std_logic;
+         count       : out std_logic_vector(bitsNeeded(depth)-1 downto 0);
          input       : in  std_logic_vector(width-1 downto 0);
          output      : out std_logic_vector(width-1 downto 0));
 end fifo;
@@ -90,7 +91,7 @@ begin
         U_FIFO_FF : entity work.fifo_core(FF)
             generic map (width             => width,
                          depth             => depth,
-                         almost_full_space => almost_full_space,
+                         almost_full_count => almost_full_count,
                          use_bram          => false,
                          same_cycle_output => same_cycle_output)
             port map (clk         => clk,
@@ -111,7 +112,7 @@ begin
         U_FIFO_RAM : entity work.fifo_core(MEMORY)
             generic map (width             => width,
                          depth             => depth,
-                         almost_full_space => almost_full_space,
+                         almost_full_count => almost_full_count,
                          use_bram          => use_bram,
                          same_cycle_output => same_cycle_output)
             port map (clk         => clk,
