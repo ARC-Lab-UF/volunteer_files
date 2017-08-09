@@ -101,6 +101,7 @@ begin
                       empty       => empty,
                       full        => full,
                       almost_full => almost_full,
+                      count       => count,
                       input       => input,
                       output      => output);
     end generate FF;
@@ -122,6 +123,7 @@ begin
                       empty       => empty,
                       full        => full,
                       almost_full => almost_full,
+                      count       => count,
                       input       => input,
                       output      => output);
     end generate MEMORY;
